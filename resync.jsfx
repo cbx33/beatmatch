@@ -1,0 +1,126 @@
+options:gmem=resync2
+desc:Resync tool
+
+slider1:deviation_thresh=20<0,25,1>max change (%)
+slider2:latch_type=0<0,1,1{note,pedal}>Latch type
+
+in_pin:none
+out_pin:none
+
+@init
+deviation_thresh_real = deviation_thresh / 100;
+gmem[0] = 0;
+last_beat_time = play_position;
+pedal_down_val = 0;
+
+@slider
+
+@block
+pdc_midi = 1.0;
+function deviation(val)
+(
+  fl = abs(val - floor(val));
+  cl = abs(val - ceil(val));
+  min(fl, cl);
+);
+
+function beatadjust(val)
+(
+  flb = abs(val - floor(val));
+  clb = abs(val - ceil(val));
+  flb <= clb ?
+    val - floor(val)
+  :
+    val - ceil(val)
+  ;
+);
+
+function deviation_beat(valt)
+(
+  flt = abs(valt - floor(valt));
+  clt = abs(valt - ceil(valt));
+  iff = floor(valt);
+  cff = ceil(valt);
+  flt <= clt ?
+    floor(valt)
+  :
+    ceil(valt)
+  ;
+);
+
+sample_pos = play_position * srate;
+while 
+(
+  midirecv(offs, m1, m2, m3) ?
+  ( 
+    event_latch = 0;
+    // only take notice of notes when we are playing
+    latch_type == 0 && m3 > 0 && m1==$x90 && play_state == 1 ? event_latch = 1;
+    latch_type == 1 && (m3 - pedal_down_val) > -50 && m2 == 64 && play_state == 1 ? event_latch = 1;
+    m2 == 64 && play_state == 1 ? pedal_down_val = m3;
+    event_latch == 1 ?
+    //m3 > 0 && m1==$x90 && play_state == 1?
+    (
+      // calculate if the received note is within THRESH of a bar line
+      dev_val = deviation(beat_position);
+      dev_val < deviation_thresh_real ?
+      (
+        // if deviation is within threshold
+        
+        // debugging
+        cur_tem = tempo;
+        sto_beat_pos = beat_position;
+        event = 1;
+        
+        // calculate how long it has been since the last beat
+        beat_duration = abs(play_position - last_beat_time);
+        old_beat_time = last_beat_time;
+        
+        // store this beats time to use next time
+        last_beat_time = play_position;
+        
+        // calculate, at current tempo, how many beats
+        // we think we should have had
+        no_beat = beat_duration / (60 / tempo);
+        
+        // round this to the nearest beat
+        int_no_beat = deviation_beat(no_beat);
+        
+        // calculate the new "normal" beat duration
+        // by dividing the delta by the number of beats we think
+        // happened
+        new_beat_length =  beat_duration / int_no_beat;
+        
+        // use this to get the new tempo
+        new_tempo = 60 / new_beat_length;
+        
+        // get the adjustment for the temp tempo
+        beat_adjust = beatadjust(beat_position);
+        
+        // calculate how much extra to play
+        missing_segment = beat_adjust * (60 / tempo);
+        
+        // figure out the length of the new bar
+        total_adjust = new_beat_length + missing_segment;
+        
+        // get the catchup tempo
+        catchup_tempo = 60 / total_adjust;
+        
+        // beat added catchup tempo
+        beat_added = ceil(beat_position);
+        
+        missing_segment < 0 ? beat_added += 1;
+        
+        // push this to gmem
+        //gmem[0] = new_tempo;
+      ); 
+    );
+  );
+
+// Need to adjust the BEAT so IF WE ARE SLOW, 
+// DON'T ADJUST NEXT BEAT BUT ONE AFTER
+floor(beat_position) > beat_added ? 
+  gmem_write = new_tempo : 
+  gmem_write = catchup_tempo;
+gmem[0] = gmem_write;
+); 

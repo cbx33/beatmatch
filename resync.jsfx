@@ -16,7 +16,7 @@ pedal_down_val = 0;
 @slider
 
 @block
-pdc_midi = 1.0;
+//pdc_midi = 1.0;
 function deviation(val)
 (
   fl = abs(val - floor(val));
@@ -60,24 +60,29 @@ while
     m2 == 64 && play_state == 1 ? pedal_down_val = m3;
     event_latch == 1 ?
     //m3 > 0 && m1==$x90 && play_state == 1?
-    (
+    ( 
+      offset_seconds = offs * (1 / srate); 
+      beat_position_block = beat_position;
+      play_position_block = play_position;
+      beat_position_real = beat_position + ((offset_seconds / 60) * tempo);
+      play_position_real = play_position + offset_seconds;
       // calculate if the received note is within THRESH of a bar line
-      dev_val = deviation(beat_position);
+      dev_val = deviation(beat_position_real); 
       dev_val < deviation_thresh_real ?
       (
         // if deviation is within threshold
         
         // debugging
         cur_tem = tempo;
-        sto_beat_pos = beat_position;
+        sto_beat_pos = beat_position_real;
         event = 1;
         
         // calculate how long it has been since the last beat
-        beat_duration = abs(play_position - last_beat_time);
+        beat_duration = abs(play_position_real - last_beat_time);
         old_beat_time = last_beat_time;
         
         // store this beats time to use next time
-        last_beat_time = play_position;
+        last_beat_time = play_position_real;
         
         // calculate, at current tempo, how many beats
         // we think we should have had
@@ -95,7 +100,7 @@ while
         new_tempo = 60 / new_beat_length;
         
         // get the adjustment for the temp tempo
-        beat_adjust = beatadjust(beat_position);
+        beat_adjust = beatadjust(beat_position_real);
         
         // calculate how much extra to play
         missing_segment = beat_adjust * (60 / tempo);
@@ -106,21 +111,11 @@ while
         // get the catchup tempo
         catchup_tempo = 60 / total_adjust;
         
-        // beat added catchup tempo
-        beat_added = ceil(beat_position);
-        
-        missing_segment < 0 ? beat_added += 1;
-        
         // push this to gmem
-        //gmem[0] = new_tempo;
+        gmem[0] = catchup_tempo;
+        gmem[1] = new_tempo;
+        gmem[2] = play_position_real + total_adjust;
       ); 
     );
   );
-
-// Need to adjust the BEAT so IF WE ARE SLOW, 
-// DON'T ADJUST NEXT BEAT BUT ONE AFTER
-floor(beat_position) > beat_added ? 
-  gmem_write = new_tempo : 
-  gmem_write = catchup_tempo;
-gmem[0] = gmem_write;
 ); 
